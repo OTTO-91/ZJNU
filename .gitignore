@@ -1,0 +1,12 @@
+﻿# 敏感文件 - 包含密码
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 临时文件
+*.log
+_fix*.py
+cookies.json
