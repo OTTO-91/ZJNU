@@ -1,0 +1,9 @@
+﻿[Unit]
+Description=ZJNU Badminton Court Auto-Booking
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/court-booking
+ExecStart=/opt/court-booking/venv/bin/python /opt/court-booking/book.py --book
+StandardOutput=append:/opt/court-booking/booking.log
+StandardError=append:/opt/court-booking/booking.log

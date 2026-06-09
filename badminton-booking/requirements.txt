@@ -1,3 +1,4 @@
 ﻿requests>=2.28
-lxml>=4.9
 PyExecJS>=1.5
+beautifulsoup4>=4.11
+lxml>=4.9
