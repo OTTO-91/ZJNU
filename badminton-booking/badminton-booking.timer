@@ -1,5 +1,5 @@
 ﻿[Unit]
-Description=ZJNU Badminton Booking
+Description=ZJNU Badminton Booking Timer
 
 [Timer]
 OnCalendar=*-*-* 07:00:00

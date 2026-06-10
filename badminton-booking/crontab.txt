@@ -1,2 +1,2 @@
-﻿# 每天早上 7:00:00 执行
-0 7 * * * cd /opt/court-booking && ./venv/bin/python book.py --book >> booking.log 2>&1
+﻿# 每天早上 7:00:00 执行预约
+0 7 * * * cd /root/ZJNU-tycg-order && ./run.sh --loop

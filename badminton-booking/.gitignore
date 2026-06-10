@@ -3,6 +3,8 @@
 
 # Session
 session.pkl
+cookies.json
+token.json
 
 # Logs
 booking.log
