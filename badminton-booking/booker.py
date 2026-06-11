@@ -1,23 +1,20 @@
-﻿# -*- coding: utf-8 -*-
-"""Core booking engine for ZJNU sports courts.
-
-Modes:
-- scan: Show available slots for tomorrow
-- book: Immediate booking attempt
-- loop: Pre-fetch + precise-timed booking at 07:00:00
-"""
-
-import json
+﻿import json
 import logging
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import requests
 
 log = logging.getLogger("booker")
 
 DIR = Path(__file__).parent.resolve()
 LAST_BOOKING = DIR / "last_booking.json"
 DAY_OFFSET = 1  # book for tomorrow
+
+MAX_RETRIES = 3           # max retries per payload on transient errors
+BASE_BACKOFF = 0.5        # base backoff seconds (doubles each retry)
+RATE_LIMIT_BACKOFF = 2.0  # extra delay when server says "请求过于频繁"
 
 
 def _time_to_min(time_str):
@@ -152,32 +149,19 @@ def book(sess, courts):
     t_start = datetime.now()
     log.info("Firing %d booking requests...", len(all_payloads))
 
+    throttle_extra = 0.0
+
     for i, p in enumerate(all_payloads):
-        r = sess.post("/api/pay/CreateOrder", json_data=p["body"])
-        code = r.get("code") if isinstance(r, dict) else -1
-        info = r.get("info", "") if isinstance(r, dict) else str(r)[:60]
-        elapsed = (datetime.now() - t_start).total_seconds()
-
-        log.info(
-            "[%d] %s %s #%s: code=%d delay=%.2fs %s",
-            i + 1, p["court"], p["start_time"], p["field_no"],
-            code, elapsed, str(info)[:60]
-        )
-
-        if code == 1:
-            log.info("*** BOOKING SUCCESS! ***")
-            log.info("  %s %s-%s #%s", p["court"], p["start_time"], p["end_time"], p["field_no"])
-
-            LAST_BOOKING.write_text(json.dumps({
-                "date": target_date,
-                "court": p["court"],
-                "time": f"{p['start_time']}-{p['end_time']}",
-                "field": p["field_no"],
-            }, ensure_ascii=False, indent=2), "utf-8")
-
+        result = _try_book(sess, p, t_start, i + 1)
+        if result is True:
+            _save_last_booking(p, target_date)
             return p
+        elif result == "rate_limited":
+            throttle_extra = max(throttle_extra, RATE_LIMIT_BACKOFF)
 
-        time.sleep(0.3)
+        sleep_time = 0.3 + throttle_extra
+        throttle_extra = max(0.0, throttle_extra - 0.3)
+        time.sleep(sleep_time)
 
     log.warning("All slots exhausted, booking failed.")
     return None
@@ -239,33 +223,91 @@ def loop(sess, courts):
     t_fire = datetime.now()
     log.info("FIRE at %s", t_fire.strftime("%H:%M:%S.%f")[:15])
 
+    throttle_extra = 0.0
+
     for i, p in enumerate(all_payloads):
-        r = sess.post("/api/pay/CreateOrder", json_data=p["body"])
-        code = r.get("code") if isinstance(r, dict) else -1
-        info = r.get("info", "") if isinstance(r, dict) else str(r)[:60]
-        elapsed = (datetime.now() - t_fire).total_seconds()
-
-        log.info(
-            "[%d] %s %s #%s: code=%d delay=%.2fs %s",
-            i + 1, p["court"], p["start_time"], p["field_no"],
-            code, elapsed, str(info)[:60]
-        )
-
-        if code == 1:
-            log.info("*** BOOKING SUCCESS! ***")
-            log.info("  %s %s-%s #%s", p["court"], p["start_time"], p["end_time"], p["field_no"])
-
-            LAST_BOOKING.write_text(json.dumps({
-                "date": target_date,
-                "court": p["court"],
-                "time": f"{p['start_time']}-{p['end_time']}",
-                "field": p["field_no"],
-            }, ensure_ascii=False, indent=2), "utf-8")
-
+        result = _try_book(sess, p, t_fire, i + 1)
+        if result is True:
+            _save_last_booking(p, target_date)
             return p
+        elif result == "rate_limited":
+            throttle_extra = max(throttle_extra, RATE_LIMIT_BACKOFF)
 
-        # Brief delay between attempts to avoid rate-limiting
-        time.sleep(0.3)
+        sleep_time = 0.3 + throttle_extra
+        throttle_extra = max(0.0, throttle_extra - 0.3)
+        time.sleep(sleep_time)
 
     log.warning("All pre-built payloads exhausted, booking failed.")
     return None
+
+
+# ── Shared helpers ──
+
+def _try_book(sess, payload, t_start, idx):
+    """Try to book a single payload, with retries for transient errors.
+
+    Returns:
+        True            booking succeeded
+        False           booking rejected (non-transient failure)
+        "rate_limited"  server explicitly said "请求过于频繁"
+        None            exhausted retries on transient errors
+    """
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = sess.post("/api/pay/CreateOrder", json_data=payload["body"])
+            code = r.get("code") if isinstance(r, dict) else -1
+            info = str(r.get("info", "")) if isinstance(r, dict) else str(r)[:60]
+            elapsed = (datetime.now() - t_start).total_seconds()
+
+            log.info(
+                "[%d] %s %s #%s: code=%d delay=%.2fs %s",
+                idx, payload["court"], payload["start_time"], payload["field_no"],
+                code, elapsed, info[:60]
+            )
+
+            if code == 1:
+                log.info("*** BOOKING SUCCESS! ***")
+                log.info("  %s %s-%s #%s",
+                         payload["court"], payload["start_time"],
+                         payload["end_time"], payload["field_no"])
+                return True
+
+            # Non-retryable: slot full / already max bookings
+            if "已满" in info or "库存" in info or "已锁定" in info:
+                return False
+
+            # Rate-limiting by server — caller should back off
+            if "过于频繁" in info or "频繁" in info:
+                return "rate_limited"
+
+            # Other unexpected non-1 codes: don't retry
+            return False
+
+        except (requests.exceptions.ReadTimeout,
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            if attempt < MAX_RETRIES - 1:
+                backoff = BASE_BACKOFF * (2 ** attempt)
+                log.warning(
+                    "[%d] Network error on attempt %d/%d: %s — retrying in %.1fs",
+                    idx, attempt + 1, MAX_RETRIES, e, backoff
+                )
+                time.sleep(backoff)
+            else:
+                log.error(
+                    "[%d] Network error after %d retries: %s — giving up on this slot",
+                    idx, MAX_RETRIES, e
+                )
+                return None
+
+    return None
+
+
+def _save_last_booking(payload, target_date):
+    """Persist successful booking info to disk."""
+    LAST_BOOKING.write_text(json.dumps({
+        "date": target_date,
+        "court": payload["court"],
+        "time": f"{payload['start_time']}-{payload['end_time']}",
+        "field": payload["field_no"],
+    }, ensure_ascii=False, indent=2), "utf-8")

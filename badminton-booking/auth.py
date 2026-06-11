@@ -284,7 +284,7 @@ class Session:
         headers = kwargs.pop("headers", {})
         if self.token:
             headers["Authorization"] = self.token
-        resp = self.http.get(url, headers=headers, allow_redirects=True, timeout=10, **kwargs)
+        resp = self.http.get(url, headers=headers, allow_redirects=True, timeout=kwargs.pop("timeout", 10), **kwargs)
         try:
             return resp.json()
         except ValueError:
@@ -300,12 +300,12 @@ class Session:
             headers["Content-Type"] = "application/json"
             resp = self.http.post(
                 url, json=json_data, headers=headers,
-                allow_redirects=True, timeout=10, **kwargs
+                allow_redirects=True, timeout=kwargs.pop("timeout", 10), **kwargs
             )
         else:
             resp = self.http.post(
                 url, data=data, headers=headers,
-                allow_redirects=True, timeout=10, **kwargs
+                allow_redirects=True, timeout=kwargs.pop("timeout", 10), **kwargs
             )
         try:
             return resp.json()
