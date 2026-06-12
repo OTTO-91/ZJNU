@@ -46,7 +46,7 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/OTTO-91/ZJNU-tycg-order.git
+git clone https://github.com/OTTO-91/ZJNU.git
 cd ZJNU-tycg-order
 ```
 
