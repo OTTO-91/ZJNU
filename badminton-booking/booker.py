@@ -1,5 +1,6 @@
 ﻿import json
 import logging
+import random
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,6 +16,7 @@ DAY_OFFSET = 1  # book for tomorrow
 MAX_RETRIES = 3           # max retries per payload on transient errors
 BASE_BACKOFF = 0.5        # base backoff seconds (doubles each retry)
 RATE_LIMIT_BACKOFF = 2.0  # extra delay when server says "请求过于频繁"
+MAX_REFRESH_ROUNDS = 30   # max re-fetch rounds before giving up
 
 
 def _time_to_min(time_str):
@@ -140,11 +142,8 @@ def book(sess, courts):
         log.warning("No bookable slots found!")
         return None
 
-    # Sort: earliest time first, then by court priority
-    court_rank = {c["name"]: i for i, c in enumerate(courts)}
-    all_payloads.sort(
-        key=lambda p: (-_time_to_min(p["start_time"]), court_rank.get(p["court"], 99))
-    )
+    # Sort by time (latest first), then shuffle within same time
+    all_payloads = _shuffle_within_time(all_payloads, courts)
 
     t_start = datetime.now()
     log.info("Firing %d booking requests...", len(all_payloads))
@@ -167,41 +166,24 @@ def book(sess, courts):
     return None
 
 
-# ── Loop Mode (pre-fetch + precise timing) ──
+# ── Loop Mode (pre-fetch + precise timing, re-fetch on every failure) ──
 
 def loop(sess, courts):
-    """Pre-fetch all data, then fire at exactly 07:00:00.
+    """Pre-fetch for session warm-up, wait until 07:00:00.000,
+    then enter a re-fetch-and-try loop: after each failed booking,
+    re-fetch the real-time available slots before the next attempt.
 
-    Phase 1: Pre-fetch and build all payloads
+    Phase 1: Pre-fetch (warm up session)
     Phase 2: Wait until 07:00:00.000
-    Phase 3: Fire CreateOrder requests
+    Phase 3: Loop { re-fetch → try best → sleep → repeat }
     """
     target_date = (datetime.now() + timedelta(days=DAY_OFFSET)).strftime("%Y-%m-%d")
 
-    # ── Phase 1: Pre-fetch ──
-    log.info("=== Loop mode: pre-fetching all data ===")
-    all_payloads = []
-
+    # ── Phase 1: Pre-fetch (session warm-up) ──
+    log.info("=== Loop mode: pre-fetching for session warm-up ===")
     for court in courts:
-        payloads = _fetch_slots(sess, court, target_date)
-        log.info("  %s: %d bookable slots pre-built", court["name"], len(payloads))
-        all_payloads.extend(payloads)
-
-    if not all_payloads:
-        log.warning("No bookable slots at all!")
-        return None
-
-    # Sort: earliest time first, then by court preference order
-    court_rank = {c["name"]: i for i, c in enumerate(courts)}
-    all_payloads.sort(
-        key=lambda p: (-_time_to_min(p["start_time"]), court_rank.get(p["court"], 99))
-    )
-
-    best = all_payloads[0]
-    log.info(
-        "Total %d pre-built payloads, best: %s %s #%s",
-        len(all_payloads), best["court"], best["start_time"], best["field_no"]
-    )
+        warm = _fetch_slots(sess, court, target_date)
+        log.info("  %s: %d slots (warm-up)", court["name"], len(warm))
 
     # ── Phase 2: Wait until 07:00:00.000 ──
     now = datetime.now()
@@ -211,25 +193,59 @@ def loop(sess, courts):
         wait = (target - now).total_seconds()
         log.info("Waiting %.0fs until 07:00:00.000", wait)
 
-        # Sleep until ~1.5s before target, then spin-wait
         if wait > 1.5:
             time.sleep(wait - 1.5)
 
-        # Spin-wait for precision
         while datetime.now() < target:
             pass
 
-    # ── Phase 3: Fire! ──
     t_fire = datetime.now()
     log.info("FIRE at %s", t_fire.strftime("%H:%M:%S.%f")[:15])
 
+    # ── Phase 3: Re-fetch loop ──
     throttle_extra = 0.0
+    attempted_times = set()
+    attempt_count = 0
 
-    for i, p in enumerate(all_payloads):
-        result = _try_book(sess, p, t_fire, i + 1)
+    for round_num in range(1, MAX_REFRESH_ROUNDS + 1):
+        # Re-fetch live slots
+        log.info("--- Round %d: re-fetching live slots ---", round_num)
+        all_payloads = []
+        for court in courts:
+            try:
+                payloads = _fetch_slots(sess, court, target_date)
+                all_payloads.extend(payloads)
+            except Exception as e:
+                log.warning("  %s: re-fetch failed: %s", court["name"], e)
+
+        if not all_payloads:
+            log.warning("No bookable slots at all!")
+            return None
+
+        # Sort by time (latest first), shuffle within same time
+        all_payloads = _shuffle_within_time(all_payloads, courts)
+
+        # Pick the best slot we haven't tried yet
+        best = None
+        for p in all_payloads:
+            key = (p["court"], p["start_time"], p["field_no"])
+            if key not in attempted_times:
+                best = p
+                break
+
+        if best is None:
+            log.warning("All %d live slots have been attempted, giving up.",
+                        len(all_payloads))
+            return None
+
+        attempted_times.add((best["court"], best["start_time"], best["field_no"]))
+
+        attempt_count += 1
+        result = _try_book(sess, best, t_fire, attempt_count)
+
         if result is True:
-            _save_last_booking(p, target_date)
-            return p
+            _save_last_booking(best, target_date)
+            return best
         elif result == "rate_limited":
             throttle_extra = max(throttle_extra, RATE_LIMIT_BACKOFF)
 
@@ -237,11 +253,36 @@ def loop(sess, courts):
         throttle_extra = max(0.0, throttle_extra - 0.3)
         time.sleep(sleep_time)
 
-    log.warning("All pre-built payloads exhausted, booking failed.")
+    log.warning("Max refresh rounds (%d) reached, booking failed.", MAX_REFRESH_ROUNDS)
     return None
 
 
 # ── Shared helpers ──
+
+def _shuffle_within_time(payloads, courts):
+    """Sort by time (latest first), then randomly shuffle within each
+    time group.  This avoids always hitting the same field first and
+    spreads collision risk across other concurrent bookers.
+    """
+    court_rank = {c["name"]: i for i, c in enumerate(courts)}
+
+    # Group by start_time
+    groups = {}
+    for p in payloads:
+        t = p["start_time"]
+        groups.setdefault(t, []).append(p)
+
+    result = []
+    for t in sorted(groups.keys(), reverse=True):
+        # Within the same time slot, shuffle to randomize field selection
+        group = groups[t]
+        random.shuffle(group)
+        # Then sort by court preference so preferred courts still try first
+        group.sort(key=lambda p: court_rank.get(p["court"], 99))
+        result.extend(group)
+
+    return result
+
 
 def _try_book(sess, payload, t_start, idx):
     """Try to book a single payload, with retries for transient errors.
