@@ -47,7 +47,7 @@
 
 ```bash
 git clone https://github.com/OTTO-91/ZJNU.git
-cd ZJNU-tycg-order
+cd ZJNU
 ```
 
 ### 2. 安装依赖
