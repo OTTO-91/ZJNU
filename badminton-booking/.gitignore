@@ -24,3 +24,6 @@ __pycache__/
 Thumbs.db
 
 last_booking.json
+
+# Machine-specific
+run_loop.bat
