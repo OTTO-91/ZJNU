@@ -3,7 +3,7 @@ Description=ZJNU Badminton Court Auto-Booking
 
 [Service]
 Type=oneshot
-WorkingDirectory=/root/ZJNU-tycg-order
-ExecStart=/root/ZJNU-tycg-order/venv/bin/python /root/ZJNU-tycg-order/badminton-booking/main.py --loop
+WorkingDirectory=/root/ZJNU
+ExecStart=/root/ZJNU/venv/bin/python /root/ZJNU/badminton-booking/main.py --loop
 StandardOutput=journal
 StandardError=journal

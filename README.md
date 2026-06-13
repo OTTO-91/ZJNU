@@ -123,7 +123,7 @@ crontab -e
 
 添加：
 ```
-0 7 * * * cd /root/ZJNU-tycg-order && ./run.sh --loop
+0 7 * * * cd /root/ZJNU && ./run.sh --loop
 ```
 
 ### 方式二：systemd timer
@@ -148,7 +148,7 @@ sudo systemctl enable --now badminton-booking.timer
 ## 项目结构
 
 ```
-ZJNU-tycg-order/
+ZJNU/
 ├── run.sh                        # 快捷启动脚本
 ├── README.md                     # 项目主页
 ├── zjnu.py                       # 原始参考脚本
