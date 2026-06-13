@@ -41,20 +41,23 @@ log = logging.getLogger("main")
 
 def _handle_result(result, sendkey, mode):
     """Handle booking result: log and send notification."""
-    if result:
-        log.info("✅ Booking successful!")
+    if result == "account_limit":
+        log.warning("? ????????")
+        sc_send(sendkey, "?????????",
+                "????? 3 ???\n???????????")
+    elif result:
+        log.info("? Booking successful!")
         msg = (
-            f"场地: {result['court']}\n"
-            f"时间: {result['start_time']}-{result['end_time']}\n"
-            f"场号: #{result['field_no']}\n"
-            f"日期: {result['date']}"
+            f"??: {result['court']}\n"
+            f"??: {result['start_time']}-{result['end_time']}\n"
+            f"??: #{result['field_no']}\n"
+            f"??: {result['date']}"
         )
-        sc_send(sendkey, "预约成功 🎉", msg)
+        sc_send(sendkey, "???? ??", msg)
     else:
-        log.warning("❌ Booking failed")
-        if mode == "loop":
-            sc_send(sendkey, "预约失败", "场地已被锁定或无可预约时段")
-
+        log.warning("? Booking failed")
+        sc_send(sendkey, "????",
+                "60 ????????\n?????????????")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -110,29 +113,19 @@ Examples:
     # ── Initialize session ──
     sess = Session()
 
-    # Try to restore existing session
-    if not sess.load() or not sess.tok:
-        log.info("No valid session, logging in...")
+    # Try to restore session; login if token missing or expired
+    if not sess.load() or not sess.tok or not sess.ensure_token():
+        reason = "????" if not sess.tok else "Token ??"
+        log.info("%s?????...", reason)
         try:
             sess.login(username, password)
         except RuntimeError as e:
-            log.error("Login failed: %s", e)
-            sc_send(sendkey, "登录失败", str(e))
+            log.error("%s: %s", reason, e)
+            sc_send(sendkey, reason, str(e))
             sys.exit(1)
     else:
         log.info("Using saved session.")
 
-    # Ensure token is fresh
-    if not sess.ensure_token():
-        log.info("Token expired, re-logging in...")
-        try:
-            sess.login(username, password)
-        except RuntimeError as e:
-            log.error("Re-login failed: %s", e)
-            sc_send(sendkey, "重新登录失败", str(e))
-            sys.exit(1)
-
-    # ── Execute mode ──
     if args.scan:
         scan(sess, courts)
     elif args.loop:
