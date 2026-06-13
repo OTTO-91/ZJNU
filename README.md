@@ -1,4 +1,4 @@
-﻿# 浙师大体育场地自动预约 🏸
+# 浙师大体育场地自动预约 🏸
 
 浙江师范大学（ZJNU）体育场地自动预约脚本，支持多校区、多运动项目。
 **每天早上 7:00 准时抢场，微秒级卡秒，一个请求搞定。**
@@ -14,6 +14,7 @@
 - [命令说明](#命令说明)
 - [抢场原理](#抢场原理)
 - [服务器部署](#服务器部署)
+- [Windows 部署](#windows-部署)
 - [消息推送](#消息推送)
 - [项目结构](#项目结构)
 - [常见问题](#常见问题)
@@ -136,6 +137,50 @@ sudo systemctl enable --now badminton-booking.timer
 ```
 
 ---
+
+## Windows 部署
+
+### 环境准备
+
+确保已安装 Python 3 和 Node.js（PyExecJS 需要 Node 运行 `ez.js`）：
+
+```powershell
+cd badminton-booking
+pip install -r requirements.txt
+```
+
+### 首次配置
+
+```powershell
+python main.py --setup
+```
+
+### 创建定时任务
+
+以**管理员身份**打开 PowerShell，执行：
+
+```powershell
+schtasks /create /tn "ZJNU抢场" /tr "python badminton-booking\main.py --loop" /sc daily /st 06:54 /f
+```
+
+### 自动唤醒
+
+1. 控制面板 → 电源选项 → 高级电源设置 → 睡眠 → **允许唤醒计时器** → 启用
+2. `Win + R` → `taskschd.msc` → "ZJNU抢场" → 属性 → 条件 → 勾选「唤醒计算机运行此任务」
+
+### 防止鼠标误唤醒
+
+```powershell
+powercfg /devicequery wake_armed
+powercfg /devicedisablewake "HID Keyboard Device"
+powercfg /devicedisablewake "HID-compliant mouse"
+```
+
+### 自动睡眠（可选）
+
+```powershell
+schtasks /create /tn "ZJNU睡眠" /tr "rundll32.exe powrprof.dll,SetSuspendState 0,1,0" /sc daily /st 00:30 /f
+```
 
 ## 消息推送
 
