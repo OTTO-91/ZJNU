@@ -16,7 +16,7 @@ DAY_OFFSET = 1  # book for tomorrow
 MAX_RETRIES = 3         # max retries per payload on transient errors
 BASE_BACKOFF = 0.5      # base backoff seconds (doubles each retry)
 BOOK_TIMEOUT = 60       # max total seconds to keep trying (from fire time)
-REFEECTH_RETRIES = 3    # re-fetch attempts before falling back to warm-up data
+REFETCH_RETRIES = 3    # re-fetch attempts before falling back to warm-up data
 
 
 def _time_to_min(time_str):
@@ -141,6 +141,10 @@ def book(sess, courts):
     log.info("Firing %d booking requests...", len(all_payloads))
 
     for i, p in enumerate(all_payloads):
+        if (datetime.now() - t_start).total_seconds() >= BOOK_TIMEOUT:
+            log.warning("Book timeout (%ds) reached.", BOOK_TIMEOUT)
+            return None
+
         result = _try_book(sess, p, t_start, i + 1)
         if result is True:
             _save_last_booking(p, target_date)
@@ -231,7 +235,7 @@ def loop(sess, courts):
         # Re-fetch live data
         log.info("--- Re-fetching live slots (%.0fs elapsed) ---", elapsed)
         all_payloads = []
-        for _ in range(REFEECTH_RETRIES):
+        for _ in range(REFETCH_RETRIES):
             all_payloads = []
             for court in courts:
                 try:
