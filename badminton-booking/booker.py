@@ -48,16 +48,18 @@ def _fetch_slots(sess, court, target_date):
 
     # Get field list
     f_resp = sess.get(f"/api/court/getFieldNoList?product_id={cid}")
-    if not f_resp or f_resp.get("code") != 1:
-        log.warning("  %s: failed to get field list", court["name"])
+    if not isinstance(f_resp, dict) or f_resp.get("code") != 1:
+        log.warning("  %s: failed to get field list (type=%s)", court["name"],
+                     type(f_resp).__name__)
         return []
 
     # Get price/slot data
     p_resp = sess.get(
         f"/api/court/getCourtPrice?product_id={cid}&venue_id={cid}&date={target_date}"
     )
-    if not p_resp or p_resp.get("code") != 1:
-        log.warning("  %s: failed to get pricing data", court["name"])
+    if not isinstance(p_resp, dict) or p_resp.get("code") != 1:
+        log.warning("  %s: failed to get pricing data (type=%s)", court["name"],
+                     type(p_resp).__name__)
         return []
 
     fields = f_resp["data"]["result"]
@@ -148,7 +150,6 @@ def book(sess, courts):
     t_start = datetime.now()
     log.info("Firing %d booking requests...", len(all_payloads))
 
-    throttle_extra = 0.0
 
     for i, p in enumerate(all_payloads):
         result = _try_book(sess, p, t_start, i + 1)
@@ -156,11 +157,11 @@ def book(sess, courts):
             _save_last_booking(p, target_date)
             return p
         elif result == "rate_limited":
-            throttle_extra = max(throttle_extra, RATE_LIMIT_BACKOFF)
+            log.info("  Rate limited, backing off for 10s...")
 
-        sleep_time = 0.3 + throttle_extra
-        throttle_extra = max(0.0, throttle_extra - 0.3)
-        time.sleep(sleep_time)
+        # Wait 10s between attempts (server rate limit);
+        # next round will re-fetch fresh live data
+        time.sleep(10)
 
     log.warning("All slots exhausted, booking failed.")
     return None
@@ -203,23 +204,32 @@ def loop(sess, courts):
     log.info("FIRE at %s", t_fire.strftime("%H:%M:%S.%f")[:15])
 
     # ── Phase 3: Re-fetch loop ──
-    throttle_extra = 0.0
     attempted_times = set()
     attempt_count = 0
 
     for round_num in range(1, MAX_REFRESH_ROUNDS + 1):
-        # Re-fetch live slots
-        log.info("--- Round %d: re-fetching live slots ---", round_num)
+        # Re-fetch live slots (retry up to 3 times if all fail)
         all_payloads = []
-        for court in courts:
-            try:
-                payloads = _fetch_slots(sess, court, target_date)
-                all_payloads.extend(payloads)
-            except Exception as e:
-                log.warning("  %s: re-fetch failed: %s", court["name"], e)
+        for refetch_try in range(3):
+            all_payloads = []
+            for court in courts:
+                try:
+                    payloads = _fetch_slots(sess, court, target_date)
+                    all_payloads.extend(payloads)
+                except Exception as e:
+                    log.warning("  %s: re-fetch failed: %s", court["name"], e)
+
+            if all_payloads:
+                log.info("--- Round %d: re-fetched %d live slots ---",
+                         round_num, len(all_payloads))
+                break
+            else:
+                log.warning("--- Round %d re-fetch attempt %d/3 got 0 slots ---",
+                            round_num, refetch_try + 1)
+                time.sleep(2)
 
         if not all_payloads:
-            log.warning("No bookable slots at all!")
+            log.warning("No bookable slots after 3 re-fetch attempts!")
             return None
 
         # Sort by time (latest first), shuffle within same time
@@ -247,11 +257,11 @@ def loop(sess, courts):
             _save_last_booking(best, target_date)
             return best
         elif result == "rate_limited":
-            throttle_extra = max(throttle_extra, RATE_LIMIT_BACKOFF)
+            log.info("  Rate limited, backing off for 10s...")
 
-        sleep_time = 0.3 + throttle_extra
-        throttle_extra = max(0.0, throttle_extra - 0.3)
-        time.sleep(sleep_time)
+        # Wait 10s between attempts (server rate limit);
+        # next round will re-fetch fresh live data
+        time.sleep(10)
 
     log.warning("Max refresh rounds (%d) reached, booking failed.", MAX_REFRESH_ROUNDS)
     return None

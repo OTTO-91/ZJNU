@@ -1,2 +1,2 @@
 ﻿# 每天早上 7:00:00 执行预约
-0 7 * * * cd /root/ZJNU-tycg-order && ./run.sh --loop
+0 7 * * * cd /root/ZJNU && ./run.sh --loop
