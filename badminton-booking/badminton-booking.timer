@@ -1,8 +1,9 @@
-﻿[Unit]
+[Unit]
 Description=ZJNU Badminton Booking Timer
 
 [Timer]
-OnCalendar=*-*-* 07:00:00
+# 必须早于 07:00：脚本需要时间启动、登录并预取数据（约 2~3 秒）
+OnCalendar=*-*-* 06:55:00
 Persistent=true
 
 [Install]
