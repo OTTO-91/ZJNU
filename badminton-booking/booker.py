@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 import random
 import time
@@ -45,16 +45,20 @@ def _fetch_slots(sess, court, target_date):
 
     f_resp = sess.get(f"/api/court/getFieldNoList?product_id={cid}")
     if not isinstance(f_resp, dict) or f_resp.get("code") != 1:
-        log.warning("  %s: failed to get field list (type=%s)", court["name"],
-                     type(f_resp).__name__)
+        code = f_resp.get("code") if isinstance(f_resp, dict) else "?"
+        info = str(f_resp.get("info", ""))[:60] if isinstance(f_resp, dict) else ""
+        log.warning("  %s: failed to get field list (code=%s) %s", court["name"],
+                     code, info)
         return []
 
     p_resp = sess.get(
         f"/api/court/getCourtPrice?product_id={cid}&venue_id={cid}&date={target_date}"
     )
     if not isinstance(p_resp, dict) or p_resp.get("code") != 1:
-        log.warning("  %s: failed to get pricing data (type=%s)", court["name"],
-                     type(p_resp).__name__)
+        code = p_resp.get("code") if isinstance(p_resp, dict) else "?"
+        info = str(p_resp.get("info", ""))[:60] if isinstance(p_resp, dict) else ""
+        log.warning("  %s: failed to get pricing data (code=%s) %s", court["name"],
+                     code, info)
         return []
 
     fields = f_resp["data"]["result"]
@@ -288,7 +292,11 @@ def loop(sess, courts):
 # ── Shared helpers ──
 
 def _shuffle_within_time(payloads, courts):
-    """Sort by time (latest first), then randomly shuffle within each time group."""
+    """Sort by time (latest first), then randomly shuffle within each time group.
+
+    Latest-first is intentional: evening slots (e.g. 20:00) are the preferred
+    target, so they are attempted before earlier ones.
+    """
     court_rank = {c["name"]: i for i, c in enumerate(courts)}
     groups = {}
     for p in payloads:

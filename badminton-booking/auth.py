@@ -265,9 +265,22 @@ class Session:
             log.warning("Failed to extract token: %s", e)
 
     def ensure_token(self):
-        """Ensure we have a valid token. Re-extract if missing."""
+        """Ensure we have a valid token. Verify it against the API."""
         if self.token:
-            return True
+            # Verify token is actually valid with a quick API call
+            try:
+                resp = self.http.get(
+                    f"{BASE_URL}/api/court/getFieldNoList?product_id=87",
+                    headers={"Authorization": self.token},
+                    allow_redirects=True, timeout=10,
+                )
+                data = resp.json()
+                if data.get("code") == 1:
+                    return True
+                log.warning("Token invalid (code=%s), will re-extract.",
+                             data.get("code"))
+            except Exception as e:
+                log.warning("Token validation failed: %s", e)
 
         if not self.is_logged_in():
             log.warning("Session expired, cannot extract token")
