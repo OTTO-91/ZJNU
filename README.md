@@ -466,7 +466,17 @@ sudo systemctl enable --now badminton-booking.timer
 
 ### Windows：计划任务
 
-以**管理员身份**打开 PowerShell（注意用绝对路径，计划任务不继承 PATH）：
+以**管理员身份**打开 PowerShell。计划任务不继承 PATH，所以必须写虚拟环境
+Python 的**绝对路径**。
+
+先把下面命令里的 `C:\ZJNU` 换成你的实际克隆目录，然后在项目根目录执行这条
+命令查出版本，确认路径无误：
+
+```powershell
+(Get-Location).Path
+```
+
+创建任务（`/st 06:54` 表示每天 06:54 启动）：
 
 ```powershell
 schtasks /create /tn "ZJNU抢场" /tr "C:\ZJNU\.venv\Scripts\python.exe C:\ZJNU\badminton-booking\main.py --loop" /sc daily /st 06:54 /f
@@ -475,9 +485,12 @@ schtasks /create /tn "ZJNU抢场" /tr "C:\ZJNU\.venv\Scripts\python.exe C:\ZJNU\
 任务已存在时改用 `/change`（**同样需要管理员权限**，否则报 `Access is denied`）：
 
 ```powershell
-schtasks /change /tn "ZJNU抢场" /tr "..."
+schtasks /change /tn "ZJNU抢场" /tr "C:\ZJNU\.venv\Scripts\python.exe C:\ZJNU\badminton-booking\main.py --loop"
 schtasks /change /tn "ZJNU抢场" /enable
 ```
+
+> 若克隆在其他盘符或目录，把两处 `C:\ZJNU` 一并替换即可，注意 `.venv` 与
+> `badminton-booking` 的相对位置不要写错。
 
 需要唤醒睡眠中的电脑时：控制面板 → 电源选项 → 高级电源设置 → 睡眠 →
 **允许唤醒计时器** → 启用；然后在 `taskschd.msc` 里勾选「唤醒计算机运行此任务」。
