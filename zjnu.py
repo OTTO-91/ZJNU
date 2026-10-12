@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta
+from datetime import datetime, timedelta
 import json
 import os
 import re
@@ -18,7 +18,9 @@ if (DIR / ".env").exists():
             k, v = line.split("=", 1)
             _env[k.strip()] = v.strip().strip("'\"").strip("'")
 import re
-from pathlib import Pathquests
+from pathlib import Path
+
+import requests
 
 # 读取JS文件内容
 with open("ez.js", "r", encoding="utf-8") as f:

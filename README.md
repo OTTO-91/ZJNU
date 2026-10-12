@@ -107,7 +107,7 @@ cd ..
 
 07:00:00.000  精确触发，依次发送下单请求
   ├─ 优先发首选时段，满则自动 fall 到次选
-  └─ 每个请求间隔 0.3 秒，避免限流
+  └─ 每个请求间隔 10 秒，避免限流（60 秒超时内最多试 6 个场地）
 
 完成 → 结果写入日志 + Server酱微信推送
 ```
@@ -142,25 +142,29 @@ sudo systemctl enable --now badminton-booking.timer
 
 ### 环境准备
 
-确保已安装 Python 3 和 Node.js（PyExecJS 需要 Node 运行 `ez.js`）：
+确保已安装 Python 3 和 Node.js（PyExecJS 需要 Node 运行 `ez.js`）。
+
+推荐用虚拟环境（避免污染系统 Python，且 3.12 下依赖较新）：
 
 ```powershell
-cd badminton-booking
-pip install -r requirements.txt
+# 在项目根目录
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r badminton-booking\requirements.txt
 ```
 
 ### 首次配置
 
 ```powershell
-python main.py --setup
+cd badminton-booking
+..\.venv\Scripts\python.exe main.py --setup
 ```
 
 ### 创建定时任务
 
-以**管理员身份**打开 PowerShell，执行：
+以**管理员身份**打开 PowerShell，执行（注意用虚拟环境的绝对路径，定时任务不继承 PATH）：
 
 ```powershell
-schtasks /create /tn "ZJNU抢场" /tr "python badminton-booking\main.py --loop" /sc daily /st 06:54 /f
+schtasks /create /tn "ZJNU抢场" /tr "C:\ZJNU\.venv\Scripts\python.exe C:\ZJNU\badminton-booking\main.py --loop" /sc daily /st 06:54 /f
 ```
 
 ### 自动唤醒

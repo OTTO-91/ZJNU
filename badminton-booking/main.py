@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """ZJNU Court Auto-Booking
 
@@ -18,6 +18,15 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+
+# ── Console safety ──
+# On Windows the console is often GBK (cp936): CJK renders fine, but emoji
+# raise UnicodeEncodeError and abort the script. Degrade them to "?" instead.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 from config import get_credentials, get_courts, get_sendkey, setup_env, ENV_FILE
 from auth import Session, COOKIE_FILE, TOKEN_FILE
@@ -42,22 +51,23 @@ log = logging.getLogger("main")
 def _handle_result(result, sendkey, mode):
     """Handle booking result: log and send notification."""
     if result == "account_limit":
-        log.warning("? ????????")
-        sc_send(sendkey, "?????????",
-                "????? 3 ???\n???????????")
+        log.warning("⚠ 账号预约已达上限")
+        sc_send(sendkey, "账号预约数已达上限",
+                "最多只能订 3 个场地\n请先取消已有预约后重试")
     elif result:
-        log.info("? Booking successful!")
+        log.info("✅ Booking successful!")
         msg = (
-            f"??: {result['court']}\n"
-            f"??: {result['start_time']}-{result['end_time']}\n"
-            f"??: #{result['field_no']}\n"
-            f"??: {result['date']}"
+            f"场地: {result['court']}\n"
+            f"时间: {result['start_time']}-{result['end_time']}\n"
+            f"场号: #{result['field_no']}\n"
+            f"日期: {result['date']}"
         )
-        sc_send(sendkey, "???? ??", msg)
+        sc_send(sendkey, "预约成功 🎉", msg)
     else:
-        log.warning("? Booking failed")
-        sc_send(sendkey, "????",
-                "60 ????????\n?????????????")
+        log.warning("❌ Booking failed")
+        sc_send(sendkey, "预约失败",
+                "60 秒内未能抢到场地\n场地已被锁定或无可预约时段")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -115,8 +125,8 @@ Examples:
 
     # Try to restore session; login if token missing or expired
     if not sess.load() or not sess.tok or not sess.ensure_token():
-        reason = "????" if not sess.tok else "Token ??"
-        log.info("%s?????...", reason)
+        reason = "登录失效" if not sess.tok else "Token 失效"
+        log.info("%s，正在登录...", reason)
         try:
             sess.login(username, password)
         except RuntimeError as e:
