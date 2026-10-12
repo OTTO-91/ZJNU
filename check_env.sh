@@ -75,13 +75,56 @@ elif command -v apk     >/dev/null 2>&1; then PM=apk
 elif command -v brew    >/dev/null 2>&1; then PM=brew
 fi
 
+# ── 发行版识别 ──
+# 用 while-read 解析而不是 source /etc/os-release：
+# 后者会把文件里的变量注入当前 shell，且遇到非法语法会中断脚本。
+DISTRO=""; DISTRO_VER=""; DISTRO_PRETTY=""
+if [ -r /etc/os-release ]; then
+    while IFS='=' read -r _k _v; do
+        # 去掉可能的 CR（文件若为 CRLF，会让引号剥离失败并留下尾随引号）
+        _v="${_v%$'\r'}"
+        _v="${_v%\"}"; _v="${_v#\"}"
+        case "$_k" in
+            ID)          DISTRO="$_v" ;;
+            VERSION_ID)  DISTRO_VER="$_v" ;;
+            PRETTY_NAME) DISTRO_PRETTY="$_v" ;;
+        esac
+    done < /etc/os-release
+fi
+
+# 各发行版自带 python3 的版本（用于判断是否需要额外操作）
+EXPECT_PY=""
+case "${DISTRO}:${DISTRO_VER}" in
+    ubuntu:24.04)                        EXPECT_PY="3.12" ;;
+    ubuntu:22.04)                        EXPECT_PY="3.10" ;;
+    ubuntu:20.04)                        EXPECT_PY="3.8"  ;;
+    ubuntu:18.04)                        EXPECT_PY="3.6"  ;;
+    debian:13)                           EXPECT_PY="3.13" ;;
+    debian:12)                           EXPECT_PY="3.11" ;;
+    debian:11)                           EXPECT_PY="3.9"  ;;
+    debian:10)                           EXPECT_PY="3.7"  ;;
+    centos:7)                            EXPECT_PY="3.6"  ;;
+    centos:8|rocky:8|almalinux:8|rhel:8) EXPECT_PY="3.6"  ;;
+    rocky:9|almalinux:9|rhel:9)          EXPECT_PY="3.9"  ;;
+    rocky:10|almalinux:10|rhel:10)       EXPECT_PY="3.12" ;;
+    fedora:*)                            EXPECT_PY="3.13" ;;
+esac
+
+# 依赖要求 Python >= 3.7（requests>=2.28 的硬性约束）
+MIN_PY="3.7"
+
 printf '%s\n' "=================================================="
 printf '%s\n' "  ZJNU 体育场馆预约 - 环境自检"
 printf '%s\n' "=================================================="
-note "系统: $UNAME_S   包管理器: ${PM:-未识别}   身份: $( [ -z "$SUDO" ] && echo root || echo 普通用户 )"
+if [ -n "$DISTRO_PRETTY" ]; then
+    note "系统: $DISTRO_PRETTY   包管理器: ${PM:-未识别}   身份: $( [ -z "$SUDO" ] && echo root || echo 普通用户 )"
+    [ -n "$EXPECT_PY" ] && note "该版本自带 Python $EXPECT_PY（本项目要求 >= $MIN_PY）"
+else
+    note "系统: $UNAME_S   包管理器: ${PM:-未识别}   身份: $( [ -z "$SUDO" ] && echo root || echo 普通用户 )"
+fi
 
 # ── 1. Python 3 ──
-head_ "[1/7] Python 3"
+head_ "[1/8] Python 3"
 
 # 逐个候选解释器实测，而不是只看 `command -v`。
 # Windows 上 python3 常是 Microsoft Store 的占位存根：命令存在但不产生任何输出。
@@ -106,15 +149,28 @@ if [ -z "$PY" ]; then
         pacman) add_fix "${SUDO}pacman -S --noconfirm python" ;;
         apk)    add_fix "${SUDO}apk add python3 py3-pip" ;;
         brew)   add_fix "brew install python3" ;;
-        *)      add_fix "请先安装 Python 3.8 或更高版本" ;;
+        *)      add_fix "请先安装 Python $MIN_PY 或更高版本" ;;
     esac
 else
     PYPATH="$(command -v "$PY")"
-    if "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3,8) else 1)' 2>/dev/null; then
+    if "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3,7) else 1)' 2>/dev/null; then
         ok "Python $PY_VER  ($PYPATH)"
     else
-        bad "Python 版本过低: $PY_VER（需要 3.8+）"
-        add_fix "请升级到 Python 3.8 或更高版本"
+        bad "Python 版本过低: $PY_VER（本项目依赖要求 >= $MIN_PY）"
+        note "requests>=2.28 需要 Python 3.7+，无法在此版本上安装依赖"
+        case "${DISTRO}:${DISTRO_VER}" in
+            centos:7|centos:8|rhel:7|rhel:8)
+                add_fix "sudo yum install -y centos-release-scl && sudo yum install -y rh-python38 && scl enable rh-python38 bash"
+                note "CentOS 7/8 已 EOL，也可改用 Rocky Linux 9 / AlmaLinux 9（自带 Python 3.9）"
+                ;;
+            ubuntu:18.04|debian:10)
+                add_fix "sudo apt install -y python3.8 python3.8-venv python3.8-distutils"
+                note "或使用 deadsnakes PPA 安装更高版本"
+                ;;
+            *)
+                add_fix "请安装 Python $MIN_PY 或更高版本"
+                ;;
+        esac
     fi
 fi
 
@@ -128,7 +184,7 @@ fi
 # ── 2. venv / ensurepip ──
 # 这一项对应报错 "The virtual environment was not created successfully
 # because ensurepip is not available" —— Debian/Ubuntu 把 venv 拆成了独立包
-head_ "[2/7] venv 与 ensurepip（创建虚拟环境的能力）"
+head_ "[2/8] venv 与 ensurepip（创建虚拟环境的能力）"
 
 VENV_FIX=""
 if [ -n "$PYMAJMIN" ]; then
@@ -165,7 +221,7 @@ else
 fi
 
 # ── 3. 虚拟环境与依赖 ──
-head_ "[3/7] 项目虚拟环境与依赖"
+head_ "[3/8] 项目虚拟环境与依赖"
 
 VENV=""
 for d in venv .venv; do
@@ -216,7 +272,7 @@ PYEOF
 fi
 
 # ── 4. Node.js ──
-head_ "[4/7] Node.js（PyExecJS 依赖，缺了会直接崩）"
+head_ "[4/8] Node.js（PyExecJS 依赖，缺了会直接崩）"
 
 if command -v node >/dev/null 2>&1; then
     ok "Node.js $(node --version 2>/dev/null)  ($(command -v node))"
@@ -234,7 +290,7 @@ else
 fi
 
 # ── 5. 时区 ──
-head_ "[5/7] 系统时区（错了不会报错，但会抢错时间）"
+head_ "[5/8] 系统时区（错了不会报错，但会抢错时间）"
 
 if [ "$PLATFORM" = "linux" ]; then
     TZOFF="$(date +%z 2>/dev/null)"
@@ -258,7 +314,7 @@ else
 fi
 
 # ── 6. 网络连通性 ──
-head_ "[6/7] 网络连通性"
+head_ "[6/8] 网络连通性"
 
 if [ -n "$PY" ]; then
     net_check() {
@@ -291,8 +347,34 @@ else
     note "无 Python，跳过网络检查"
 fi
 
-# ── 7. 配置文件 ──
-head_ "[7/7] 配置文件"
+# ── 7. 脚本执行权限 ──
+# 从 Windows 解压 / 用 FTP 上传 / 挂载到 noexec 分区时，执行位可能丢失，
+# 表现为 "./run.sh: Permission denied"。git clone 通常不会丢。
+head_ "[7/8] 脚本执行权限"
+
+if [ "$PLATFORM" = "gitbash" ]; then
+    note "Git Bash / NTFS 不强制执行位，跳过（Linux 上才有意义）"
+else
+    NEED_CHMOD=""
+    for s in run.sh check_env.sh; do
+        if [ ! -f "$s" ]; then
+            continue
+        elif [ ! -x "$s" ]; then
+            bad "$s 没有执行权限 —— 会报 Permission denied"
+            NEED_CHMOD="$NEED_CHMOD $s"
+        else
+            ok "$s 可执行"
+        fi
+    done
+
+    if [ -n "$NEED_CHMOD" ]; then
+        add_fix "chmod +x${NEED_CHMOD}"
+        note "临时替代: 用 'bash run.sh --scan' 也能运行，不需要执行权限"
+    fi
+fi
+
+# ── 8. 配置文件 ──
+head_ "[8/8] 配置文件"
 
 if [ -f badminton-booking/.env ]; then
     if grep -q '^ZJNU_USERNAME=' badminton-booking/.env 2>/dev/null; then

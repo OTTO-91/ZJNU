@@ -4,7 +4,7 @@
 **每天早上 7:00 准时抢场，毫秒级触发，一次命中。**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](badminton-booking/LICENSE)
-[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://python.org)
+[![Python 3.7+](https://img.shields.io/badge/Python-3.7%2B-blue)](https://python.org)
 
 ## 目录
 
@@ -16,6 +16,7 @@
 - [抢场原理](#抢场原理)
 - [配置项](#配置项)
 - [服务器部署（从零开始）](#服务器部署从零开始)
+- [发行版 / 版本对照表](#发行版与版本对照表)
 - [服务器常见问题](#服务器常见问题)
 - [Windows 部署](#windows-部署)
 - [消息推送](#消息推送)
@@ -53,9 +54,10 @@
 
 | 依赖 | 版本 | 说明 |
 |------|------|------|
-| Python | 3.8+ | 已在 3.12 上验证 |
+| Python | **3.7+** | 由 `requests>=2.28` 决定。已在 3.6 / 3.12 上实测 |
 | Node.js | 任意 LTS | **必需**。PyExecJS 需要 Node 执行 `ez.js` 完成密码 AES 加密 |
 | 系统时间 | 需准确 | 脚本按本机时钟卡点，请确保已开启系统时间同步 |
+| 系统时区 | +0800 | **错了不报错，但会在错误的时间抢场** |
 
 Python 依赖（`badminton-booking/requirements.txt`）：
 
@@ -207,20 +209,26 @@ cd /root/ZJNU
 输出示例：
 
 ```
-[1/7] Python 3
+系统: Ubuntu 24.04.1 LTS   包管理器: apt   身份: root
+该版本自带 Python 3.12（本项目要求 >= 3.7）
+
+[1/8] Python 3
   [ OK ] Python 3.12.10  (/usr/bin/python3)
-[2/7] venv 与 ensurepip（创建虚拟环境的能力）
+[2/8] venv 与 ensurepip（创建虚拟环境的能力）
   [FAIL] ensurepip 缺失 —— 这正是 "ensurepip is not available" 报错的原因
-[4/7] Node.js（PyExecJS 依赖，缺了会直接崩）
+[4/8] Node.js（PyExecJS 依赖，缺了会直接崩）
   [FAIL] 未找到 node —— 脚本导入 auth.py 时会抛 RuntimeUnavailableError
-[5/7] 系统时区（错了不会报错，但会抢错时间）
+[5/8] 系统时区（错了不会报错，但会抢错时间）
   [FAIL] 当前时区 UTC +0000，不是 +0800
+[7/8] 脚本执行权限
+  [FAIL] run.sh 没有执行权限 —— 会报 Permission denied
 ...
 建议按顺序执行以下命令:
 
   sudo apt update && (sudo apt install -y python3.12-venv || sudo apt install -y python3-venv)
   sudo apt install -y nodejs
   sudo timedatectl set-timezone Asia/Shanghai
+  chmod +x run.sh check_env.sh
 ```
 
 想让它**自动执行**这些修复命令：
@@ -231,20 +239,59 @@ cd /root/ZJNU
 
 它会在动手前把要执行的命令列出来并征求确认。
 
-检查的 7 项：
+检查的 8 项：
 
 | # | 检查项 | 缺失后果 |
 |---|--------|----------|
-| 1 | Python 3.8+ | 无法运行 |
+| 1 | Python **3.7+** | 无法运行（`requests>=2.28` 要求 3.7+） |
 | 2 | `venv` / `ensurepip` | 建不了虚拟环境（就是 `ensurepip is not available` 报错） |
 | 3 | 虚拟环境 + 四个 Python 依赖 | 无法运行 |
 | 4 | Node.js | **导入 `auth.py` 时直接崩** |
 | 5 | 系统时区为 +0800 | **不报错，但在错误的时间抢场** |
 | 6 | 能否连上校内系统 | 校外需连学校 VPN |
-| 7 | `.env` 账号配置 | 会引导你跑 `--setup` |
+| 7 | `run.sh` 执行权限 | `Permission denied`（见 [权限问题](#脚本没有执行权限permission-denied)） |
+| 8 | `.env` 账号配置 | 会引导你跑 `--setup` |
 
-`check_env.sh` 兼容 Debian/Ubuntu、CentOS/RHEL/Fedora、Arch、Alpine、macOS 和 Git Bash，
-会自动识别包管理器给出对应命令。
+`check_env.sh` 会自动识别发行版和版本，兼容 Ubuntu、Debian、CentOS、Rocky/AlmaLinux、
+Fedora、Arch、Alpine、macOS 和 Git Bash。
+
+---
+
+### 发行版与版本对照表
+
+**不同系统版本差别很大**，先在下表找到你的系统，再照做。
+
+| 系统 | 版本 | 自带 Python | 能否直接用 | 需要做什么 |
+|------|------|-------------|-----------|-----------|
+| **Ubuntu** | 24.04 LTS | 3.12 | ✅ | 只需 `python3-venv` |
+| | 22.04 LTS | 3.10 | ✅ | 只需 `python3-venv` |
+| | 20.04 LTS | 3.8 | ✅ | 只需 `python3-venv` |
+| | 18.04 LTS | 3.6 | ❌ | **Python 版本过低**，需装 3.8+ |
+| **Debian** | 13 trixie | 3.13 | ✅ | 只需 `python3-venv` |
+| | 12 bookworm | 3.11 | ✅ | 只需 `python3-venv` |
+| | 11 bullseye | 3.9 | ✅ | 只需 `python3-venv` |
+| | 10 buster | 3.7 | ⚠️ | 刚好够，但已 EOL，建议升级系统 |
+| **CentOS** | 7 | 3.6 | ❌ | **系统已 EOL**，需装 Python 3.8（见下） |
+| | 8 / Stream 8 | 3.6 | ❌ | **系统已 EOL**，同上 |
+| **Rocky / AlmaLinux** | 9 | 3.9 | ✅ | 直接可用 |
+| | 8 | 3.6 | ❌ | 装 Python 3.9 模块 |
+| **Fedora** | 40+ | 3.13 | ✅ | 直接可用 |
+| **Arch** | 滚动 | 最新 | ✅ | 直接可用 |
+| **Alpine** | 3.19+ | 3.11+ | ✅ | 需装 `bash`（默认只有 `sh`） |
+
+> **关键约束**：`requirements.txt` 里的 `requests>=2.28` 要求 **Python ≥ 3.7**。
+> 低于这个版本**装不上依赖**，不是脚本能绕过的。
+>
+> 换句话说：**CentOS 7/8、Ubuntu 18.04、Debian 10 这些老系统需要先解决 Python 版本**。
+
+#### 判断自己的系统
+
+```bash
+cat /etc/os-release     # 看 NAME 和 VERSION_ID
+python3 --version       # 看实际 Python 版本
+```
+
+或者直接跑 `./check_env.sh`，它会替你判断并给出结论。
 
 ---
 
@@ -256,35 +303,91 @@ cd /root/ZJNU
 ./check_env.sh --fix
 ```
 
-手动装的话，按你的系统选一行：
+手动装的话，按下表选你的系统。
 
-**Debian / Ubuntu**（最常见，包括所有云厂商的默认镜像）
+#### Ubuntu / Debian 全系
 
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-pip python3-venv nodejs git
 ```
 
-> ⚠️ 如果 `python3-venv` 提示找不到，把版本号带上，例如 `python3.12-venv`。
-> 这是 Debian/Ubuntu 特有的拆分：Python 本体和 `venv` 是两个包。
+> ⚠️ **`python3-venv` 找不到时**，把版本号带上：
+>
+> ```bash
+> sudo apt install -y python3.12-venv     # Ubuntu 24.04
+> sudo apt install -y python3.10-venv     # Ubuntu 22.04
+> sudo apt install -y python3.11-venv     # Debian 12
+> ```
+>
+> 版本号用 `python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])'` 查。
+> 这是 Debian/Ubuntu 特有的拆分：Python 本体和 `venv` 是**两个包**，
+> 装 Python 时不会自动带上 `venv`。
 
-**CentOS / RHEL / Fedora**
+#### CentOS 7 / 8（需要额外步骤）
+
+系统自带的 Python 3.6 **太旧**，装不上依赖。两条路：
+
+**方案 A：换系统（推荐）**
+
+CentOS 7 已于 2024-06-30 EOL、CentOS 8 于 2021-12-31 EOL，官方源已下线，
+继续使用会遇到 `Could not resolve host: mirrorlist.centos.org` 等问题。
+建议重装为 **Rocky Linux 9** 或 **AlmaLinux 9**（自带 Python 3.9，开箱即用）。
+
+**方案 B：装新版 Python**
+
+```bash
+sudo yum install -y centos-release-scl
+sudo yum install -y rh-python38
+scl enable rh-python38 bash
+python3 --version        # 应为 3.8.x
+```
+
+> 用 SCL 装的 Python 只在该 `scl enable` 会话里生效。
+> **crontab 里必须显式带上**，否则定时任务仍会用旧的 3.6：
+>
+> ```
+> 55 6 * * * cd /root/ZJNU && scl enable rh-python38 -- ./run.sh --loop
+> ```
+
+#### Rocky Linux / AlmaLinux / RHEL
+
+**9 / 10**（自带 3.9+，直接用）：
 
 ```bash
 sudo dnf install -y python3 python3-pip nodejs git
 ```
 
-**Arch**
+**8**（自带 3.6，需启用新版模块）：
+
+```bash
+sudo dnf module enable -y python39
+sudo dnf install -y python39 python39-pip nodejs git
+```
+
+> 注意此时命令是 `python3.9` 而非 `python3`，创建虚拟环境要用：
+> `python3.9 -m venv venv`
+
+#### Fedora
+
+```bash
+sudo dnf install -y python3 python3-pip nodejs git
+```
+
+#### Arch / Manjaro
 
 ```bash
 sudo pacman -S --noconfirm python nodejs git
 ```
 
-**Alpine**
+#### Alpine
 
 ```bash
 sudo apk add python3 py3-pip nodejs git bash
 ```
+
+> Alpine 默认只有 `sh`，而 `run.sh` 需要 `bash`，所以必须装 `bash`。
+
 
 ### 第 2 步：设置时区 ⚠️
 
@@ -309,7 +412,12 @@ git clone https://github.com/OTTO-91/ZJNU.git
 cd ZJNU
 ```
 
-没装 git 就用 `apt install -y git`，或直接从 GitHub 下载 zip 解压。
+没装 git 就用 `apt install -y git`，或从 GitHub 下载 zip 解压。
+
+> **`git clone` 会自动带上执行权限，无需 `chmod`。**
+> 但如果你是在 Windows 上解压后上传到服务器，执行权限会丢失，
+> 表现为 `./run.sh: Permission denied`。修复见
+> [脚本没有执行权限](#脚本没有执行权限permission-denied)。
 
 ### 第 4 步：创建虚拟环境并安装依赖
 
@@ -329,6 +437,9 @@ venv/bin/pip install -r badminton-booking/requirements.txt \
 > venv/bin/pip --version                 # 能打印版本号即成功
 > ```
 
+> **如果报 `No matching distribution found for requests>=2.28`**：
+> Python 版本低于 3.7。见 [发行版 / 版本对照表](#发行版与版本对照表)。
+
 ### 第 5 步：验证环境
 
 ```bash
@@ -338,7 +449,7 @@ venv/bin/pip install -r badminton-booking/requirements.txt \
 全绿即可继续。或者直接手动确认关键三项：
 
 ```bash
-python3 --version     # 3.8+
+python3 --version     # 3.7+
 node --version        # 有输出即可
 date                  # +0800
 ```
@@ -433,6 +544,52 @@ tail -50 badminton-booking/booking.log      # 完整过程
 
 ## 服务器常见问题
 
+### 脚本没有执行权限（Permission denied）
+
+**症状**
+
+```
+-bash: ./run.sh: Permission denied
+```
+
+**原因**
+
+Linux 靠文件的「执行位」决定能否直接运行。以下情况会丢失它：
+
+| 场景 | 会丢吗 |
+|------|--------|
+| `git clone` | ❌ 不会，Git 保留了执行位 |
+| GitHub 网页下载 ZIP 后在 **Linux** 上 `unzip` | ❌ 不会，ZIP 里记录了权限 |
+| 在 **Windows** 上解压，再上传到服务器 | ✅ **会丢**（NTFS 没有 Unix 执行位） |
+| 用 FTP / 宝塔面板 / 某些网盘上传 | ✅ 常见会丢 |
+| 服务器把目录挂载为 `noexec` | ✅ 会丢 |
+
+**修复**
+
+```bash
+chmod +x run.sh check_env.sh
+```
+
+如果提示 `Operation not permitted`，检查是否挂载了 `noexec`：
+
+```bash
+mount | grep "$(df -h . | tail -1 | awk '{print $1}')"
+```
+
+**临时绕过**（不需要执行权限也能跑）：
+
+```bash
+bash run.sh --scan
+bash check_env.sh
+```
+
+> `./run.sh` 和 `bash run.sh` 的区别：前者要求文件可执行，后者只要可读。
+> 但 **crontab 里建议用 `./run.sh`**，并用 `chmod +x` 修好权限。
+
+**预防**：`check_env.sh` 的第 7 项会检查这个，直接跑它即可发现。
+
+---
+
 ### `ensurepip is not available`
 
 Debian/Ubuntu 把 `venv` 拆成了独立包。装完**必须重建**虚拟环境：
@@ -476,6 +633,32 @@ tail -50 /root/ZJNU/badminton-booking/booking.log
 
 不用。`.env`、`cookies.json`、`token.json` 都持久化在磁盘上，
 crontab 也会在重启后自动生效。Token 失效时脚本会自动重新登录。
+
+### `No matching distribution found for requests>=2.28`
+
+Python 版本低于 3.7。`requests>=2.28` 的元数据里写死了 `requires_python >= 3.7`，
+**pip 会直接拒绝安装**，不是网络问题。
+
+```bash
+python3 --version
+```
+
+若是 3.6（CentOS 7/8、Ubuntu 18.04 常见），见
+[发行版 / 版本对照表](#发行版与版本对照表)。
+
+### `Could not resolve host: mirrorlist.centos.org`
+
+CentOS 7/8 已 EOL，官方源已下线。这不是本项目的错误，任何 `yum install` 都会失败。
+
+建议重装为 **Rocky Linux 9** 或 **AlmaLinux 9**（与 CentOS 同源，自带 Python 3.9）。
+若必须留在 CentOS 7，需先把 yum 源指向 `vault.centos.org`：
+
+```bash
+sudo sed -i 's/^mirrorlist=/#mirrorlist=/; s|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|' /etc/yum.repos.d/CentOS-*.repo
+sudo yum makecache
+```
+
+> vault 是归档源，**不再有安全更新**。仅作过渡，不建议长期使用。
 
 ---
 
