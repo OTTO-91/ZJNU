@@ -1,0 +1,16 @@
+# 默认：由 Git 自动处理行尾
+* text=auto
+
+# Shell 脚本必须保持 LF，否则 Linux 上 shebang 会失效
+*.sh text eol=lf
+.gitattributes text eol=lf
+
+# Windows 批处理必须保持 CRLF
+*.bat text eol=crlf
+
+# 二进制文件不做转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.xlsx binary
+*.docx binary
