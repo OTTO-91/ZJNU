@@ -15,7 +15,8 @@
 - [命令说明](#命令说明)
 - [抢场原理](#抢场原理)
 - [配置项](#配置项)
-- [服务器部署](#服务器部署)
+- [服务器部署（从零开始）](#服务器部署从零开始)
+- [服务器常见问题](#服务器常见问题)
 - [Windows 部署](#windows-部署)
 - [消息推送](#消息推送)
 - [项目结构](#项目结构)
@@ -65,6 +66,9 @@ beautifulsoup4>=4.11
 lxml>=4.9
 ```
 
+> 不确定环境是否齐全？运行 **`./check_env.sh`** 一键自检，见
+> [服务器部署 - 第 0 步](#第-0-步一键环境自检)。
+
 ---
 
 ## 快速开始
@@ -113,12 +117,14 @@ cd ..
 
 | 命令 | 用途 |
 |------|------|
+| `./check_env.sh` | **环境自检**，逐项检查并给出修复命令 |
+| `./check_env.sh --fix` | 自检并自动执行修复 |
 | `./run.sh` | 立即预约明天场地 |
 | `./run.sh --scan` | 查看明天空闲场地（只读，不下单） |
 | `./run.sh --loop` | 等 7:00 准时抢场（定时任务用） |
 | `./run.sh --setup` | 重新配置账号/校区/运动 |
 
-> `run.sh` 是 bash 脚本，仅适用于 Linux / macOS / Git Bash。
+> `run.sh` 和 `check_env.sh` 是 bash 脚本，仅适用于 Linux / macOS / Git Bash。
 > Windows 原生环境请直接调用 `python main.py <参数>`，见 [Windows 部署](#windows-部署)。
 >
 > 所有模式操作的都是**明天**的场地（`DAY_OFFSET = 1`）。
@@ -184,24 +190,211 @@ cd ..
 
 ---
 
-## 服务器部署
+## 服务器部署（从零开始）
 
-### 方式一：crontab（推荐）
+> 这一节假设你刚拿到一台**全新服务器**，除了 SSH 什么都没有。
+> 全程复制粘贴即可，遇到报错先跑 `./check_env.sh`。
+
+### 第 0 步：一键环境自检
+
+项目自带 `check_env.sh`，会逐项检查所有前置条件并给出**可直接复制**的修复命令：
 
 ```bash
-crontab -e
+cd /root/ZJNU
+./check_env.sh
 ```
 
-添加：
+输出示例：
+
+```
+[1/7] Python 3
+  [ OK ] Python 3.12.10  (/usr/bin/python3)
+[2/7] venv 与 ensurepip（创建虚拟环境的能力）
+  [FAIL] ensurepip 缺失 —— 这正是 "ensurepip is not available" 报错的原因
+[4/7] Node.js（PyExecJS 依赖，缺了会直接崩）
+  [FAIL] 未找到 node —— 脚本导入 auth.py 时会抛 RuntimeUnavailableError
+[5/7] 系统时区（错了不会报错，但会抢错时间）
+  [FAIL] 当前时区 UTC +0000，不是 +0800
+...
+建议按顺序执行以下命令:
+
+  sudo apt update && (sudo apt install -y python3.12-venv || sudo apt install -y python3-venv)
+  sudo apt install -y nodejs
+  sudo timedatectl set-timezone Asia/Shanghai
+```
+
+想让它**自动执行**这些修复命令：
+
+```bash
+./check_env.sh --fix
+```
+
+它会在动手前把要执行的命令列出来并征求确认。
+
+检查的 7 项：
+
+| # | 检查项 | 缺失后果 |
+|---|--------|----------|
+| 1 | Python 3.8+ | 无法运行 |
+| 2 | `venv` / `ensurepip` | 建不了虚拟环境（就是 `ensurepip is not available` 报错） |
+| 3 | 虚拟环境 + 四个 Python 依赖 | 无法运行 |
+| 4 | Node.js | **导入 `auth.py` 时直接崩** |
+| 5 | 系统时区为 +0800 | **不报错，但在错误的时间抢场** |
+| 6 | 能否连上校内系统 | 校外需连学校 VPN |
+| 7 | `.env` 账号配置 | 会引导你跑 `--setup` |
+
+`check_env.sh` 兼容 Debian/Ubuntu、CentOS/RHEL/Fedora、Arch、Alpine、macOS 和 Git Bash，
+会自动识别包管理器给出对应命令。
+
+---
+
+### 第 1 步：安装系统依赖
+
+最省事的做法是让脚本自己判断：
+
+```bash
+./check_env.sh --fix
+```
+
+手动装的话，按你的系统选一行：
+
+**Debian / Ubuntu**（最常见，包括所有云厂商的默认镜像）
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv nodejs git
+```
+
+> ⚠️ 如果 `python3-venv` 提示找不到，把版本号带上，例如 `python3.12-venv`。
+> 这是 Debian/Ubuntu 特有的拆分：Python 本体和 `venv` 是两个包。
+
+**CentOS / RHEL / Fedora**
+
+```bash
+sudo dnf install -y python3 python3-pip nodejs git
+```
+
+**Arch**
+
+```bash
+sudo pacman -S --noconfirm python nodejs git
+```
+
+**Alpine**
+
+```bash
+sudo apk add python3 py3-pip nodejs git bash
+```
+
+### 第 2 步：设置时区 ⚠️
+
+**这一步最容易被忽略，而且错了不会报任何错。**
+
+脚本用本机时钟卡 07:00，云服务器默认通常是 UTC：
+
+```bash
+timedatectl                       # 先看当前时区
+sudo timedatectl set-timezone Asia/Shanghai
+date                              # 应显示 CST +0800 的北京时间
+```
+
+时区是 UTC 的话，脚本会在 **UTC 07:00 = 北京时间 15:00** 触发，crontab 同理，
+**永远抢不到但永远不报错**。
+
+### 第 3 步：获取代码
+
+```bash
+cd /root
+git clone https://github.com/OTTO-91/ZJNU.git
+cd ZJNU
+```
+
+没装 git 就用 `apt install -y git`，或直接从 GitHub 下载 zip 解压。
+
+### 第 4 步：创建虚拟环境并安装依赖
+
+```bash
+python3 -m venv venv
+venv/bin/pip install -r badminton-booking/requirements.txt \
+  -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+> **如果报 `ensurepip is not available`**：说明第 1 步的 `python3-venv` 没装上。
+> 补装后**必须删掉残缺的 venv 重建**，否则 pip 仍是坏的：
+>
+> ```bash
+> sudo apt install -y python3.12-venv    # 版本号按你的 python3 来
+> rm -rf venv
+> python3 -m venv venv
+> venv/bin/pip --version                 # 能打印版本号即成功
+> ```
+
+### 第 5 步：验证环境
+
+```bash
+./check_env.sh
+```
+
+全绿即可继续。或者直接手动确认关键三项：
+
+```bash
+python3 --version     # 3.8+
+node --version        # 有输出即可
+date                  # +0800
+```
+
+### 第 6 步：配置账号
+
+```bash
+./run.sh --setup
+```
+
+按提示输入学号、密码、选校区和运动项目。
+
+### 第 7 步：试运行 ⚠️
+
+```bash
+./run.sh --scan
+```
+
+**必须看到真实的场地列表才算通过**：
+
+```
+  明日 (2026-10-13) 场地空闲情况
+  综合馆羽毛球馆:
+   08:00: #1, 2, 3, 4, 5, 6
+   09:00: #1, 2, 3, 4, 5, 6
+   共 25 个可预约时段
+```
+
+- 如果报登录失败 → 检查学号密码，或确认是否需要校园网/VPN
+- 如果全是"无可用场地" → 网络通了但确实没空位，属正常
+- 如果控制台中文是乱码 → **不影响运行**，`booking.log` 是 UTF-8 的正常日志
+
+### 第 8 步：配置定时任务
+
+**方式一：crontab（推荐，最简单）**
+
+```bash
+crontab -e        # 首次会让你选编辑器，选 nano 最省事
+```
+
+加入这一行：
 
 ```
 55 6 * * * cd /root/ZJNU && ./run.sh --loop
 ```
 
-> ⚠️ **不要写成 `0 7 * * *`**。那样会在 07:00:00 才开始启动 Python、导入依赖、
+保存退出（nano 按 `Ctrl+O` 回车，再 `Ctrl+X`）。确认：
+
+```bash
+crontab -l
+```
+
+> ⚠️ **不要写成 `0 7 * * *`**。那样 07:00:00 才开始启动 Python、导入依赖、
 > 登录并预取数据，等真正发请求时已经过去 2~3 秒，热门场地早没了。
 
-### 方式二：systemd timer
+**方式二：systemd timer**
 
 ```bash
 sudo cp badminton-booking/badminton-booking.service /etc/systemd/system/
@@ -210,9 +403,79 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now badminton-booking.timer
 ```
 
-> 注意 `badminton-booking.timer` 里的 `OnCalendar` 必须早于 07:00（当前为 `06:55:00`）。
-> 同时 `badminton-booking.service` 的 `WorkingDirectory` 和 `ExecStart` 里的路径
-> 是 `/root/ZJNU`，部署到其他目录需要一并修改。
+> `badminton-booking.timer` 的 `OnCalendar` 必须早于 07:00（现为 `06:55:00`）。
+> `badminton-booking.service` 里的路径写死为 `/root/ZJNU`，**部署到其他目录必须改**。
+>
+> 检查状态：`systemctl list-timers | grep badminton`
+
+### 第 9 步：确认定时任务真的会跑
+
+**不要等到第二天早上才发现没跑。** 先手动触发一次：
+
+```bash
+cd /root/ZJNU && ./run.sh --loop
+```
+
+它会预取数据、等到 07:00、然后下单。想立刻验证而不等到 07:00，直接看日志：
+
+```bash
+tail -f badminton-booking/booking.log
+```
+
+第二天早上检查结果：
+
+```bash
+cat badminton-booking/last_booking.json     # 成功的话会有记录
+tail -50 badminton-booking/booking.log      # 完整过程
+```
+
+---
+
+## 服务器常见问题
+
+### `ensurepip is not available`
+
+Debian/Ubuntu 把 `venv` 拆成了独立包。装完**必须重建**虚拟环境：
+
+```bash
+sudo apt install -y python3.12-venv
+rm -rf venv && python3 -m venv venv
+```
+
+### 报 `RuntimeUnavailableError` 或登录直接崩
+
+缺 Node.js。PyExecJS 需要它执行 `ez.js` 做密码加密：
+
+```bash
+sudo apt install -y nodejs
+```
+
+### 定时任务没执行
+
+按顺序排查：
+
+```bash
+systemctl status cron          # 或 crond，确认定时服务在跑
+crontab -l                     # 确认任务已写入
+grep CRON /var/log/syslog      # 看 cron 有没有触发（CentOS: /var/log/cron）
+tail -50 /root/ZJNU/badminton-booking/booking.log
+```
+
+常见原因：路径写错、cron 服务没启动、时区不对（见第 2 步）。
+
+### 抢不到，但手动跑 `--scan` 正常
+
+按可能性排序：
+
+1. **时区不对** —— 跑 `date` 确认是 `+0800`
+2. **启动太晚** —— crontab 必须是 `55 6`，不能是 `0 7`
+3. **账号已有 3 个未使用预约** —— 服务器限制，先取消
+4. 场地确实太热门
+
+### 服务器重启后还要重新配置吗
+
+不用。`.env`、`cookies.json`、`token.json` 都持久化在磁盘上，
+crontab 也会在重启后自动生效。Token 失效时脚本会自动重新登录。
 
 ---
 
@@ -221,6 +484,12 @@ sudo systemctl enable --now badminton-booking.timer
 ### 环境准备
 
 确保已安装 Python 3 和 Node.js（PyExecJS 需要 Node 运行 `ez.js`）。
+
+装好后可以先自检（Git Bash 中运行，或直接看下一节的 PowerShell 命令）：
+
+```bash
+./check_env.sh
+```
 
 推荐用虚拟环境（避免污染系统 Python，且 3.12 下依赖较新）：
 
@@ -304,6 +573,7 @@ stdout/stderr 的错误处理改为 `replace`，遇到不支持的字符会降�
 ```
 ZJNU/
 ├── run.sh                        # 快捷启动脚本（bash）
+├── check_env.sh                  # 环境自检（支持 --fix 自动修复）
 ├── README.md                     # 项目主页
 ├── zjnu.py                       # 原始单文件参考脚本（历史存档，不参与运行）
 ├── .gitattributes                # 换行符规范化（保证 run.sh 在 Linux 下为 LF）
